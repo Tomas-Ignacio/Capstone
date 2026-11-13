@@ -45,7 +45,7 @@ class FinanzasApp extends StatelessWidget {
           backgroundColor: Color(0xFF101A20),
           indicatorColor: Color(0x2631D9D0),
           labelTextStyle: WidgetStatePropertyAll(
-            TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+            TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
           ),
           iconTheme: WidgetStatePropertyAll(
             IconThemeData(color: Color(0xFF9CAEB0)),
@@ -85,6 +85,17 @@ class FinanzasApp extends StatelessWidget {
         useMaterial3: true,
       ),
       home: const HomeScreen(),
+      builder: (context, child) {
+        final mediaQuery = MediaQuery.of(context);
+        return MediaQuery(
+          data: mediaQuery.copyWith(
+            // Prioritize comfortable reading on compact phones. Individual
+            // widgets still use hierarchy, but no screen falls back to tiny text.
+            textScaler: mediaQuery.textScaler.clamp(minScaleFactor: 1.25),
+          ),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
     );
   }
 }

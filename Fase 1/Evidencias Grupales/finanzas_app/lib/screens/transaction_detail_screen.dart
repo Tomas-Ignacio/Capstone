@@ -301,22 +301,25 @@ class _TransactionDetailScreenState extends State<TransactionDetailScreen> {
         borderRadius: BorderRadius.circular(15),
         border: Border.all(color: const Color(0xFF23343B)),
       ),
-      child: ListTile(
-        leading: Icon(icono, color: _teal),
-        title: Text(
-          titulo,
-          style: const TextStyle(fontSize: 12, color: _muted),
+      child: Material(
+        color: Colors.transparent,
+        child: ListTile(
+          leading: Icon(icono, color: _teal),
+          title: Text(
+            titulo,
+            style: const TextStyle(fontSize: 12, color: _muted),
+          ),
+          subtitle: Text(
+            valor,
+            style: const TextStyle(fontSize: 15, color: _text),
+          ),
+          trailing: accion == null
+              ? null
+              : TextButton(
+                  onPressed: accion,
+                  child: Text(textoAccion ?? 'Cambiar'),
+                ),
         ),
-        subtitle: Text(
-          valor,
-          style: const TextStyle(fontSize: 15, color: _text),
-        ),
-        trailing: accion == null
-            ? null
-            : TextButton(
-                onPressed: accion,
-                child: Text(textoAccion ?? 'Cambiar'),
-              ),
       ),
     );
   }

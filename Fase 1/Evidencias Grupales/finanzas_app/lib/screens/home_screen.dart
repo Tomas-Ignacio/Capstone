@@ -8,6 +8,7 @@ import '../db/database_helper.dart';
 import '../models/categoria.dart';
 import '../models/presupuesto.dart';
 import '../models/transaccion.dart';
+import '../services/financial_insights.dart';
 import 'add_transaction_screen.dart';
 import 'categories_screen.dart';
 import 'savings_goals_screen.dart';
@@ -39,6 +40,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   double _gastos = 0;
   double _ingresosMes = 0;
   double _gastosMes = 0;
+  double _gastosMesAnterior = 0;
   Map<String, double> _gastosPorCategoriaMes = {};
   List<Transaccion> _movimientos = [];
   List<Presupuesto> _presupuestos = [];
@@ -105,11 +107,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (mounted) setState(() => _cargando = true);
     try {
       final mes = _mesClave(DateTime.now());
+      final mesAnterior = _mesClave(
+        DateTime(DateTime.now().year, DateTime.now().month - 1),
+      );
       final categorias = await _db.getCategorias();
       final ingresos = await _db.getTotalPorTipo('ingreso');
       final gastos = await _db.getTotalPorTipo('gasto');
       final ingresosMes = await _db.getTotalPorTipo('ingreso', mes: mes);
       final gastosMes = await _db.getTotalPorTipo('gasto', mes: mes);
+      final gastosMesAnterior = await _db.getTotalPorTipo(
+        'gasto',
+        mes: mesAnterior,
+      );
       final porCategoria = await _db.getGastosPorCategoria(mes: mes);
       final movimientos = await _db.getTransacciones();
       final presupuestos = await _db.getPresupuestos(mes);
@@ -120,6 +129,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _gastos = gastos;
         _ingresosMes = ingresosMes;
         _gastosMes = gastosMes;
+        _gastosMesAnterior = gastosMesAnterior;
         _gastosPorCategoriaMes = porCategoria;
         _movimientos = movimientos;
         _presupuestos = presupuestos;
@@ -406,6 +416,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return entradas.take(3).toList();
   }
 
+  List<_GastoMensual> _gastosUltimosSeisMeses() {
+    const abreviaturas = [
+      'Ene',
+      'Feb',
+      'Mar',
+      'Abr',
+      'May',
+      'Jun',
+      'Jul',
+      'Ago',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dic',
+    ];
+    final hoy = DateTime.now();
+    final gastosPorMes = <String, double>{};
+    for (final movimiento in _movimientos) {
+      if (movimiento.tipo != 'gasto') continue;
+      final fecha = DateTime.tryParse(movimiento.fecha);
+      if (fecha == null) continue;
+      final clave = _mesClave(fecha);
+      gastosPorMes.update(
+        clave,
+        (total) => total + movimiento.monto,
+        ifAbsent: () => movimiento.monto,
+      );
+    }
+    return List.generate(6, (indice) {
+      final fecha = DateTime(hoy.year, hoy.month - 5 + indice);
+      final clave = _mesClave(fecha);
+      return _GastoMensual(
+        etiqueta: abreviaturas[fecha.month - 1],
+        monto: gastosPorMes[clave] ?? 0,
+        actual: indice == 5,
+      );
+    });
+  }
+
   List<double> _tendenciaSemana() {
     final hoy = DateTime.now();
     final neto = List<double>.filled(7, 0);
@@ -567,6 +616,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
           const SizedBox(height: 21),
+          _comparacionMensual(),
+          const SizedBox(height: 12),
+          _alertaPresupuesto(),
+          const SizedBox(height: 21),
+          _tituloSeccion('Gastos por mes'),
+          const SizedBox(height: 9),
+          _gastosMensuales(),
+          const SizedBox(height: 21),
+          _tituloSeccion('Asistente financiero inteligente'),
+          const SizedBox(height: 9),
+          _asistenteFinanciero(),
+          const SizedBox(height: 21),
           _tituloSeccion(
             'Gastos de ${_mesLegible(DateTime.now()).split(' ').first}',
           ),
@@ -599,7 +660,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           children: [
             const Text(
               'Buenas tardes',
-              style: TextStyle(color: _muted, fontSize: 13),
+              style: TextStyle(color: _muted, fontSize: 14),
             ),
             const SizedBox(height: 2),
             const Text(
@@ -629,8 +690,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       : 'Detector automático inactivo',
                   style: TextStyle(
                     color: _detectorActivo ? const Color(0xFFA0E8D1) : _muted,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ],
@@ -647,7 +708,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   );
 
   Widget _hero() => _glass(
-    padding: const EdgeInsets.all(18),
+    padding: const EdgeInsets.all(20),
     borderColor: _cyan.withValues(alpha: .25),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -659,7 +720,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 'Patrimonio disponible',
                 style: TextStyle(
                   color: _muted,
-                  fontSize: 12,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -677,22 +738,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ],
         ),
-        Text(
-          _ocultarSaldo ? '••••••••' : _fmt(_saldo),
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 34,
-            fontWeight: FontWeight.w800,
-            letterSpacing: -1.5,
+        SizedBox(
+          width: double.infinity,
+          child: FittedBox(
+            alignment: Alignment.centerLeft,
+            fit: BoxFit.scaleDown,
+            child: Text(
+              _ocultarSaldo ? '••••••••' : _fmt(_saldo),
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 42,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -1.5,
+              ),
+            ),
           ),
         ),
         Text(
           _mesLegible(DateTime.now()),
-          style: const TextStyle(color: _muted, fontSize: 11),
+          style: const TextStyle(color: _muted, fontSize: 12),
         ),
         const SizedBox(height: 10),
         SizedBox(
-          height: 105,
+          height: 112,
           width: double.infinity,
           child: CustomPaint(painter: _BalanceTrendPainter(_tendenciaSemana())),
         ),
@@ -716,7 +784,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Widget _miniMetrica(String titulo, String valor, Color color) => Expanded(
     child: Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: .05),
         borderRadius: BorderRadius.circular(11),
@@ -724,7 +792,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(titulo, style: const TextStyle(color: _muted, fontSize: 8)),
+          Text(
+            titulo,
+            style: const TextStyle(
+              color: _muted,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
           const SizedBox(height: 2),
           FittedBox(
             fit: BoxFit.scaleDown,
@@ -733,7 +808,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               valor,
               style: TextStyle(
                 color: color,
-                fontSize: 12,
+                fontSize: 14,
                 fontWeight: FontWeight.w800,
               ),
             ),
@@ -776,7 +851,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       onTap: onTap,
       borderRadius: BorderRadius.circular(17),
       child: Ink(
-        height: 86,
+        height: 104,
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: .055),
           border: Border.all(color: Colors.white.withValues(alpha: .10)),
@@ -786,13 +861,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
-              width: 34,
-              height: 34,
+              width: 44,
+              height: 44,
               decoration: BoxDecoration(
                 color: color.withValues(alpha: .15),
                 borderRadius: BorderRadius.circular(11),
               ),
-              child: Icon(icono, color: color, size: 19),
+              child: Icon(icono, color: color, size: 24),
             ),
             const SizedBox(height: 6),
             Text(
@@ -800,7 +875,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               textAlign: TextAlign.center,
               style: const TextStyle(
                 color: Color(0xFFC8DAD8),
-                fontSize: 10,
+                fontSize: 13,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -818,23 +893,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     required Color color,
     VoidCallback? onTap,
   }) => _glass(
-    padding: const EdgeInsets.all(13),
+    padding: const EdgeInsets.all(15),
     child: GestureDetector(
       onTap: onTap,
       child: SizedBox(
-        height: 88,
+        // The global accessibility scale can enlarge labels and values.
+        // Keep enough vertical room so the financial summary never overflows.
+        height: 124,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icono, color: color, size: 19),
+            Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: .16),
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: Icon(icono, color: color, size: 20),
+            ),
             const Spacer(),
-            Text(titulo, style: const TextStyle(color: _muted, fontSize: 9)),
+            Text(
+              titulo,
+              style: const TextStyle(
+                color: _muted,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
             const SizedBox(height: 2),
             Text(
               valor,
               style: const TextStyle(
                 color: _text,
-                fontSize: 17,
+                fontSize: 22,
                 fontWeight: FontWeight.w800,
               ),
             ),
@@ -842,13 +934,397 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               detalle,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: _muted, fontSize: 8),
+              style: const TextStyle(color: _muted, fontSize: 11),
             ),
           ],
         ),
       ),
     ),
   );
+
+  Widget _comparacionMensual() {
+    final comparacion = FinancialInsights.compareMonthlyExpenses(
+      currentMonth: _gastosMes,
+      previousMonth: _gastosMesAnterior,
+    );
+    if (_gastosMesAnterior == 0) {
+      return _glass(
+        padding: const EdgeInsets.all(14),
+        child: const Row(
+          children: [
+            Icon(Icons.calendar_month_outlined, color: _violet, size: 26),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Aún no hay gastos del mes anterior para comparar.',
+                style: TextStyle(color: _muted, fontSize: 13),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final color = comparacion.isSaving ? _emerald : _danger;
+    final icono = comparacion.isSaving
+        ? Icons.trending_down_rounded
+        : comparacion.isHigher
+        ? Icons.trending_up_rounded
+        : Icons.trending_flat_rounded;
+    final mensaje = comparacion.isEqual
+        ? 'Gastaste lo mismo que el mes pasado.'
+        : comparacion.isSaving
+        ? 'Gastaste ${_fmt(comparacion.difference)} menos que el mes pasado.'
+        : 'Gastaste ${_fmt(comparacion.difference)} más que el mes pasado.';
+
+    return _glass(
+      padding: const EdgeInsets.all(14),
+      color: color.withValues(alpha: .10),
+      borderColor: color.withValues(alpha: .28),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: .15),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icono, color: color, size: 24),
+          ),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Comparación mensual',
+                  style: TextStyle(
+                    color: _text,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  mensaje,
+                  style: const TextStyle(color: _muted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _alertaPresupuesto() {
+    if (_presupuestos.isEmpty) {
+      return _tarjetaAccionPresupuesto(
+        icono: Icons.add_chart_rounded,
+        color: _cyan,
+        titulo: 'Aún no tienes presupuestos',
+        detalle: 'Crea uno por categoría para anticipar tus gastos.',
+      );
+    }
+
+    final gastadoPorCategoria = <int, double>{};
+    for (final movimiento in _movimientos) {
+      if (movimiento.tipo == 'gasto' &&
+          movimiento.fecha.startsWith(_mesClave(DateTime.now()))) {
+        gastadoPorCategoria.update(
+          movimiento.categoriaId,
+          (total) => total + movimiento.monto,
+          ifAbsent: () => movimiento.monto,
+        );
+      }
+    }
+    final proximo = _presupuestos
+        .map(
+          (presupuesto) => _EstadoPresupuesto(
+            presupuesto: presupuesto,
+            gastado: gastadoPorCategoria[presupuesto.categoriaId] ?? 0,
+          ),
+        )
+        .reduce(
+          (actual, siguiente) =>
+              actual.uso >= siguiente.uso ? actual : siguiente,
+        );
+    final categoria = _categoriasPorId[proximo.presupuesto.categoriaId];
+    final restante = math.max(
+      0.0,
+      proximo.presupuesto.montoLimite - proximo.gastado,
+    );
+    final excedido = proximo.gastado > proximo.presupuesto.montoLimite;
+    final color = excedido ? _danger : _emerald;
+    final detalle = excedido
+        ? '${categoria?.nombre ?? 'Esta categoría'} superó su límite por ${_fmt(proximo.gastado - proximo.presupuesto.montoLimite)}.'
+        : '${categoria?.nombre ?? 'Esta categoría'}: quedan ${_fmt(restante)} de ${_fmt(proximo.presupuesto.montoLimite)}.';
+    return _tarjetaAccionPresupuesto(
+      icono: excedido
+          ? Icons.warning_amber_rounded
+          : Icons.account_balance_wallet_outlined,
+      color: color,
+      titulo: excedido
+          ? 'Presupuesto superado'
+          : 'Próxima alerta de presupuesto',
+      detalle: detalle,
+    );
+  }
+
+  Widget _tarjetaAccionPresupuesto({
+    required IconData icono,
+    required Color color,
+    required String titulo,
+    required String detalle,
+  }) => GestureDetector(
+    onTap: () => setState(() => _seccionActual = 2),
+    child: _glass(
+      padding: const EdgeInsets.all(14),
+      borderColor: color.withValues(alpha: .28),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: .14),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icono, color: color, size: 23),
+          ),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  titulo,
+                  style: const TextStyle(
+                    color: _text,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  detalle,
+                  style: const TextStyle(color: _muted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right_rounded, color: _muted),
+        ],
+      ),
+    ),
+  );
+
+  Widget _gastosMensuales() {
+    final meses = _gastosUltimosSeisMeses();
+    final maximo = meses.fold<double>(
+      0,
+      (actual, mes) => math.max(actual, mes.monto).toDouble(),
+    );
+    final totalSemestre = meses.fold<double>(
+      0,
+      (actual, mes) => actual + mes.monto,
+    );
+    return _glass(
+      padding: const EdgeInsets.fromLTRB(15, 15, 15, 11),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            maximo == 0
+                ? 'Aún no hay gastos registrados.'
+                : '${_fmt(_gastosMes)} gastados este mes',
+            style: const TextStyle(
+              color: _text,
+              fontSize: 15,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            maximo == 0
+                ? 'Registra un gasto para ver la comparación mensual.'
+                : 'Total últimos 6 meses: ${_fmt(totalSemestre)}',
+            style: const TextStyle(color: _muted, fontSize: 11),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 122,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: meses.map((mes) {
+                final fraccion = maximo == 0 ? 0.0 : mes.monto / maximo;
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 3),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        if (mes.monto > 0)
+                          FittedBox(
+                            child: Text(
+                              _fmt(mes.monto),
+                              style: const TextStyle(
+                                color: _muted,
+                                fontSize: 9,
+                              ),
+                            ),
+                          ),
+                        const SizedBox(height: 5),
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.bottomCenter,
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 350),
+                              width: double.infinity,
+                              height: math.max(5, fraccion * 73),
+                              decoration: BoxDecoration(
+                                color: mes.actual ? _cyan : _violet,
+                                borderRadius: BorderRadius.circular(99),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 7),
+                        Text(
+                          mes.etiqueta,
+                          style: TextStyle(
+                            color: mes.actual ? _cyan : _muted,
+                            fontSize: 10,
+                            fontWeight: mes.actual
+                                ? FontWeight.w800
+                                : FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _asistenteFinanciero() {
+    final insights = FinancialInsights.analyze(
+      monthlyIncome: _ingresosMes,
+      monthlyExpenses: _gastosMes,
+      categoryExpenses: _gastosPorCategoriaMes,
+      totalBudget: _limiteTotal,
+    );
+    return _glass(
+      padding: EdgeInsets.zero,
+      color: const Color(0xFF15232A),
+      borderColor: _cyan.withValues(alpha: .25),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 13, 14, 9),
+            child: Row(
+              children: [
+                Container(
+                  width: 35,
+                  height: 35,
+                  decoration: BoxDecoration(
+                    color: _cyan.withValues(alpha: .14),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: const Icon(
+                    Icons.auto_awesome_rounded,
+                    color: _cyan,
+                    size: 19,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Recomendaciones basadas en tus datos',
+                        style: TextStyle(
+                          color: _text,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Análisis local: no comparte tu información.',
+                        style: TextStyle(color: _muted, fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          ...insights.take(2).map(_tarjetaInsight),
+        ],
+      ),
+    );
+  }
+
+  Widget _tarjetaInsight(FinancialInsight insight) {
+    final configuracion = switch (insight.kind) {
+      FinancialInsightKind.budgetAlert => (
+        Icons.warning_amber_rounded,
+        _danger,
+      ),
+      FinancialInsightKind.categoryFocus => (
+        Icons.pie_chart_outline_rounded,
+        _violet,
+      ),
+      FinancialInsightKind.savingProgress => (Icons.savings_outlined, _emerald),
+      FinancialInsightKind.overspending => (
+        Icons.trending_down_rounded,
+        _danger,
+      ),
+      FinancialInsightKind.startTracking => (Icons.edit_note_rounded, _cyan),
+    };
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 0, 14, 11),
+      padding: const EdgeInsets.all(11),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: .045),
+        borderRadius: BorderRadius.circular(13),
+      ),
+      child: Row(
+        children: [
+          Icon(configuracion.$1, color: configuracion.$2, size: 20),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  insight.title,
+                  style: const TextStyle(
+                    color: _text,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  insight.message,
+                  style: const TextStyle(color: _muted, fontSize: 10),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _distribucion(double total) {
     if (total == 0) {
@@ -1536,30 +2012,36 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         final opcion = entrada.value;
         return Column(
           children: [
-            ListTile(
-              onTap: opcion.onTap,
-              leading: Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: _cyan.withValues(alpha: .12),
-                  borderRadius: BorderRadius.circular(11),
+            Material(
+              color: Colors.transparent,
+              child: ListTile(
+                onTap: opcion.onTap,
+                leading: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: _cyan.withValues(alpha: .12),
+                    borderRadius: BorderRadius.circular(11),
+                  ),
+                  child: Icon(opcion.icono, color: _cyan, size: 18),
                 ),
-                child: Icon(opcion.icono, color: _cyan, size: 18),
-              ),
-              title: Text(
-                opcion.titulo,
-                style: const TextStyle(
-                  color: _text,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
+                title: Text(
+                  opcion.titulo,
+                  style: const TextStyle(
+                    color: _text,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                subtitle: Text(
+                  opcion.detalle,
+                  style: const TextStyle(color: _muted, fontSize: 9),
+                ),
+                trailing: const Icon(
+                  Icons.chevron_right_rounded,
+                  color: _muted,
                 ),
               ),
-              subtitle: Text(
-                opcion.detalle,
-                style: const TextStyle(color: _muted, fontSize: 9),
-              ),
-              trailing: const Icon(Icons.chevron_right_rounded, color: _muted),
             ),
             if (!ultima)
               Divider(
@@ -1622,12 +2104,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _tituloSeccion(String titulo, {String? accion, VoidCallback? onTap}) =>
       Row(
         children: [
+          Container(
+            width: 4,
+            height: 22,
+            decoration: BoxDecoration(
+              color: _cyan,
+              borderRadius: BorderRadius.circular(99),
+            ),
+          ),
+          const SizedBox(width: 9),
           Expanded(
             child: Text(
               titulo,
               style: const TextStyle(
                 color: _text,
-                fontSize: 14,
+                fontSize: 16,
                 fontWeight: FontWeight.w800,
               ),
             ),
@@ -1642,7 +2133,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               child: Text(
                 accion,
                 style: const TextStyle(
-                  fontSize: 10,
+                  fontSize: 12,
                   fontWeight: FontWeight.w800,
                 ),
               ),
@@ -1831,6 +2322,28 @@ class _DatosPresupuesto {
   final int categoriaId;
   final double montoLimite;
   final bool eliminar;
+}
+
+class _GastoMensual {
+  const _GastoMensual({
+    required this.etiqueta,
+    required this.monto,
+    required this.actual,
+  });
+
+  final String etiqueta;
+  final double monto;
+  final bool actual;
+}
+
+class _EstadoPresupuesto {
+  const _EstadoPresupuesto({required this.presupuesto, required this.gastado});
+
+  final Presupuesto presupuesto;
+  final double gastado;
+
+  double get uso =>
+      presupuesto.montoLimite == 0 ? 0 : gastado / presupuesto.montoLimite;
 }
 
 class _BalanceTrendPainter extends CustomPainter {

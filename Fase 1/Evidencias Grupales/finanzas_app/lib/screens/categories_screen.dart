@@ -208,43 +208,46 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                           final categoria = entrada.value;
                           return Column(
                             children: [
-                              ListTile(
-                                leading: Container(
-                                  width: 38,
-                                  height: 38,
-                                  decoration: BoxDecoration(
-                                    color: color.withValues(alpha: .14),
-                                    borderRadius: BorderRadius.circular(12),
+                              Material(
+                                color: Colors.transparent,
+                                child: ListTile(
+                                  leading: Container(
+                                    width: 38,
+                                    height: 38,
+                                    decoration: BoxDecoration(
+                                      color: color.withValues(alpha: .14),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Icon(
+                                      _icono(categoria.nombre),
+                                      color: color,
+                                      size: 20,
+                                    ),
                                   ),
-                                  child: Icon(
-                                    _icono(categoria.nombre),
-                                    color: color,
-                                    size: 20,
+                                  title: Text(
+                                    categoria.nombre,
+                                    style: const TextStyle(
+                                      color: _text,
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
-                                ),
-                                title: Text(
-                                  categoria.nombre,
-                                  style: const TextStyle(
-                                    color: _text,
-                                    fontWeight: FontWeight.w700,
+                                  subtitle: Text(
+                                    _tipo == 'gasto'
+                                        ? 'Categoría de gasto'
+                                        : 'Categoría de ingreso',
+                                    style: const TextStyle(
+                                      color: _muted,
+                                      fontSize: 11,
+                                    ),
                                   ),
-                                ),
-                                subtitle: Text(
-                                  _tipo == 'gasto'
-                                      ? 'Categoría de gasto'
-                                      : 'Categoría de ingreso',
-                                  style: const TextStyle(
-                                    color: _muted,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                                trailing: IconButton(
-                                  tooltip: 'Eliminar categoría',
-                                  onPressed: () =>
-                                      _eliminarCategoria(categoria),
-                                  icon: const Icon(
-                                    Icons.delete_outline_rounded,
-                                    color: _muted,
+                                  trailing: IconButton(
+                                    tooltip: 'Eliminar categoría',
+                                    onPressed: () =>
+                                        _eliminarCategoria(categoria),
+                                    icon: const Icon(
+                                      Icons.delete_outline_rounded,
+                                      color: _muted,
+                                    ),
                                   ),
                                 ),
                               ),
